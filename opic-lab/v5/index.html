@@ -1,5 +1,5 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>OPIc 6-6 Listening Lab · Audio-first v4</title>
+<title>OPIc 6-6 Listening Lab · Diverse Practice v5</title>
 <style>
 :root{--blue:#1976c4;--dark:#172e49;--muted:#61758b;--line:#d5e2ee;--surface:#ffffff;--bg:#edf3f9}
 *{box-sizing:border-box}body{font-family:Inter,'Segoe UI','Malgun Gothic',system-ui,sans-serif;margin:0;background:var(--bg);color:var(--dark);line-height:1.5}
@@ -89,7 +89,7 @@ const BANK={"survey":[{"title":"Music in daily life","questions":["People listen
 const $=id=>document.getElementById(id);
 const TTS=window.speechSynthesis;
 let voices=[],voice=null,questions=[],logs=[],clips=[],clipTasks=[],stream=null,recordingEnabled=false;
-let running=false,done=false,qIndex=-1,plays=0,phase='ready',startTime=0,interval=null,utterSeq=0;
+let running=false,done=false,qIndex=-1,plays=0,phase='ready',startTime=0,sessionFinalElapsed=null,interval=null,utterSeq=0;
 let activeClip=null,recognition=null,liveEnabled=false,liveRunning=false,liveWanted=false;
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const shuffled=a=>{const b=[...a];for(let i=b.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]}return b};
@@ -97,49 +97,145 @@ const clock=s=>{const t=Math.max(0,Math.floor(s));return String(Math.floor(t/60)
 const elapsed=()=>startTime?(Date.now()-startTime)/1000:0;
 const setMessage=(s)=>{$('message').textContent=s};
 // Practice estimates discussed with the user, NOT official OPIc slot probabilities.
-const SURPRISE_COUNT_WEIGHTS=[{count:0,p:0.15},{count:1,p:0.60},{count:2,p:0.25}];
-const COMBO_PATTERNS=[
-  {order:[0,1,2],weight:15},{order:[0,2,3],weight:15},
-  {order:[0,3,1],weight:10},{order:[1,0,2],weight:15},
-  {order:[1,3,2],weight:15},{order:[1,2,0],weight:10},
-  {order:[3,0,2],weight:10},{order:[3,2,1],weight:10}
-];
-function weightedPick(items,key){let total=items.reduce((sum,x)=>sum+x[key],0),r=Math.random()*total;for(const x of items){r-=x[key];if(r<0)return x}return items[items.length-1]}
-function storageRead(key){try{return localStorage.getItem(key)||''}catch(e){return ''}}
-function storageWrite(key,value){try{localStorage.setItem(key,String(value))}catch(e){}}
-function buildCombo(topic,kind){
-  const pool=[...topic.questions,topic.comparisonQuestion];
-  if(pool.length!==4||pool.some(q=>typeof q!=='string'||!q.trim()))throw Error('Invalid combo questions');
-  const pattern=weightedPick(COMBO_PATTERNS,'weight');
-  return pattern.order.map(i=>({tag:kind+' · '+topic.title,q:pool[i]}));
+
+/* OPIc 6-6 PRACTICE GENERATOR · 2026-10-11, revision 5
+   These probabilities and questions are for varied practice, not official test frequencies.
+   Only anonymous topic/question identifiers are stored in the browser to reduce repetition.
+*/
+const SURPRISE_COUNT_WEIGHTS=[{count:0,p:.15},{count:1,p:.60},{count:2,p:.25}];
+const PRACTICE_HISTORY_KEY='opic_practice_history_v5';
+const PRACTICE_HISTORY_DEPTH=8;
+function weightedChoice(items,weightFn){
+  if(!items.length)throw Error('Cannot select from an empty question pool');
+  const weights=items.map(x=>Math.max(0.001,Number(weightFn(x))||0.001));
+  let r=Math.random()*weights.reduce((a,b)=>a+b,0);
+  for(let i=0;i<items.length;i++){r-=weights[i];if(r<0)return items[i]}
+  return items[items.length-1];
+}
+function shuffledItems(arr){
+  const result=[...arr];
+  for(let i=result.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[result[i],result[j]]=[result[j],result[i]]}
+  return result;
+}
+function readExamHistory(){
+  try{
+    const value=JSON.parse(localStorage.getItem(PRACTICE_HISTORY_KEY)||'[]');
+    if(!Array.isArray(value))return [];
+    return value.filter(x=>x&&Array.isArray(x.topics)&&Array.isArray(x.questionIds)).slice(-PRACTICE_HISTORY_DEPTH);
+  }catch(e){return []}
+}
+function writeExamHistory(history){
+  try{localStorage.setItem(PRACTICE_HISTORY_KEY,JSON.stringify(history.slice(-PRACTICE_HISTORY_DEPTH)))}catch(e){}
+}
+function topicRecentlyUsed(history,id,windowSize){
+  return history.slice(-windowSize).some(x=>x.topics.includes(id));
+}
+function chooseFreshTopic(topics,history,exclude,kind){
+  let available=topics.filter(x=>!exclude.has(x.id));
+  if(!available.length)throw Error('No available '+kind+' topics');
+  // When possible, do not repeat an entire topic from the last two exams.
+  const unrepeated=available.filter(x=>!topicRecentlyUsed(history,x.id,2));
+  if(unrepeated.length)available=unrepeated;
+  return weightedChoice(available,topic=>{
+    let weight=1;
+    for(let age=1;age<=Math.min(history.length,6);age++){
+      if(history[history.length-age].topics.includes(topic.id))weight*= age<=2?.12:age<=4?.44:.78;
+    }
+    return weight;
+  });
+}
+function chooseSet(sets,history,kind,windowSize){
+  let available=sets.filter(x=>!topicRecentlyUsed(history,x.id,windowSize));
+  if(!available.length)available=sets;
+  return weightedChoice(available,item=>{
+    let weight=1;
+    for(let age=1;age<=Math.min(6,history.length);age++){
+      if(history[history.length-age].topics.includes(item.id))weight*= age<=2?.1:.5;
+    }
+    return weight;
+  });
+}
+function comboQuestionPool(topic){
+  // Four original topic questions + five independently authored variants.
+  const baseTypes=['description','routine','past_experience','non_time_compare'];
+  if(topic.id==='survey-1'||topic.id==='survey-4'||topic.id==='survey-11')baseTypes[1]='time_compare';
+  if(topic.id==='surprise-0')baseTypes[1]='non_time_compare';
+  if(topic.id==='surprise-9')baseTypes[1]='time_compare';
+  const base=topic.questions.map((q,i)=>({id:topic.id+'-core-'+i,type:baseTypes[i],q}));
+  const comparison={id:topic.id+'-comparison',type:'non_time_compare',q:topic.comparisonQuestion};
+  const extra=topic.extra||[];
+  const pool=[...base,comparison,...extra];
+  if(pool.length!==9||pool.some(x=>!x.id||!x.q||!x.type))throw Error('Invalid pool for '+topic.title);
+  return pool;
+}
+function chooseComboQuestions(topic,history){
+  const pool=comboQuestionPool(topic),picked=[],usedTypes=new Set();
+  const recentQuestionSets=history.slice(-6).map(x=>new Set(x.questionIds));
+  const typeWeights={
+    description:1.05,routine:1.05,past_experience:1.25,non_time_compare:1.08,
+    time_compare:1.08,opinion:1.02,preference:1.0,problem:1.16,process:1.0,specific:1.0
+  };
+  for(let position=0;position<3;position++){
+    let available=pool.filter(x=>!picked.some(y=>y.id===x.id)&&!usedTypes.has(x.type));
+    if(!available.length)available=pool.filter(x=>!picked.some(y=>y.id===x.id));
+    const fresh=available.filter(q=>!recentQuestionSets.slice(-3).some(h=>h.has(q.id)));
+    if(fresh.length)available=fresh;
+    const choice=weightedChoice(available,q=>{
+      let w=typeWeights[q.type]||1;
+      // Slight natural-flow preferences, but never a required question order.
+      if(position===0&&(q.type==='description'||q.type==='routine'))w*=1.22;
+      if(position===2&&(q.type==='past_experience'||q.type==='problem'))w*=1.24;
+      for(let age=1;age<=recentQuestionSets.length;age++){
+        if(recentQuestionSets[recentQuestionSets.length-age].has(q.id))w*=age<=2?.06:age<=4?.28:.6;
+      }
+      return w;
+    });
+    picked.push(choice);usedTypes.add(choice.type);
+  }
+  // Fully shuffle questions; unlike prior 8 preset patterns, any order can occur.
+  return shuffledItems(picked);
 }
 function generateQuestions(){
-  const surveys=shuffled(BANK.survey),surprises=shuffled(BANK.surprise),r=pick(BANK.rp);
-  const surpriseCount=weightedPick(SURPRISE_COUNT_WEIGHTS,'p').count;
-  // Select surprise positions uniformly; avoid an identical consecutive positioning when alternatives exist.
-  const allSlots=surpriseCount===0?[[]]:surpriseCount===1?[[0],[1],[2]]:[[0,1],[0,2],[1,2]];
-  const lastSlots=storageRead('opic_last_combo_slots');
-  const allowedSlots=allSlots.filter(slot=>slot.join(',')!==lastSlots);
-  const surpriseSlots=pick(allowedSlots.length?allowedSlots:allSlots);
-  storageWrite('opic_last_combo_slots',surpriseSlots.join(','));
-  const modes=['past_only','time_comparison','non_time_comparison','contemporary_analysis'];
-  const lastMode=storageRead('opic_last_q14_mode');
-  const allowedModes=modes.filter(mode=>mode!==lastMode);
-  const mode=pick(allowedModes.length?allowedModes:modes);
-  const h=pick(BANK.high.filter(x=>x.mode===mode));
-  storageWrite('opic_last_q14_mode',mode);
-  const out=[{tag:'Intro',q:'Let’s start the interview. Tell me a little bit about yourself.'}];
-  let si=0,vi=0;
+  const history=readExamHistory(),selectedIds=new Set(),questionIds=[];
+  const count=weightedChoice(SURPRISE_COUNT_WEIGHTS,x=>x.p).count;
+  const combinations=count===0?[[]]:count===1?[[0],[1],[2]]:[[0,1],[0,2],[1,2]];
+  // Slightly discourage identical placement, without banning it or making the next slot predictable.
+  const prev=history.at(-1)?.slots||'';
+  const surpriseSlots=weightedChoice(combinations,x=>x.join(',')===prev?.25:1);
+  const planned=[];
   for(let slot=0;slot<3;slot++){
-    const isSurprise=surpriseSlots.includes(slot);
-    const topic=isSurprise?surprises[vi++]:surveys[si++];
-    out.push(...buildCombo(topic,isSurprise?'Surprise':'Survey'));
+    const kind=surpriseSlots.includes(slot)?'surprise':'survey';
+    const topic=chooseFreshTopic(BANK[kind],history,selectedIds,kind);
+    selectedIds.add(topic.id);
+    planned.push({kind,topic});
   }
-  for(const q of r.questions)out.push({tag:'Roleplay · '+r.title,q});
-  for(const q of h.questions)out.push({tag:'Advanced · '+h.title,q});
-  if(out.length!==15)throw Error('Expected exactly 15 questions, got '+out.length);
+  const roleplay=chooseSet(BANK.rp,history,'roleplay',4);
+  selectedIds.add(roleplay.id);
+  const modes=['past_only','time_comparison','non_time_comparison','contemporary_analysis'];
+  const prevMode=history.at(-1)?.advancedMode||'';
+  const mode=weightedChoice(modes,m=>m===prevMode?.38:1);
+  const advanced=chooseSet(BANK.high.filter(x=>x.mode===mode),history,'advanced',5);
+  selectedIds.add(advanced.id);
+  const out=[{tag:'Intro',q:'Let’s start the interview. Tell me a little bit about yourself.'}];
+  for(const {kind,topic} of planned){
+    const prefix=kind==='survey'?'Survey':'Surprise';
+    for(const q of chooseComboQuestions(topic,history)){
+      out.push({tag:prefix+' · '+topic.title,q:q.q});questionIds.push(q.id);
+    }
+  }
+  for(let i=0;i<roleplay.questions.length;i++){
+    out.push({tag:'Roleplay · '+roleplay.title,q:roleplay.questions[i]});
+    questionIds.push(roleplay.id+'-'+i);
+  }
+  for(let i=0;i<advanced.questions.length;i++){
+    out.push({tag:'Advanced · '+advanced.title,q:advanced.questions[i]});
+    questionIds.push(advanced.id+'-'+i);
+  }
+  if(out.length!==15||new Set(out.map(x=>x.q)).size!==15)throw Error('Invalid question selection');
+  writeExamHistory([...history,{topics:[...selectedIds],questionIds,slots:surpriseSlots.join(','),advancedMode:mode}]);
   return out;
 }
+
 function scoreVoice(v){let n=v.name.toLowerCase();return (n.includes('natural')?100:0)+(n.includes('ava')?70:0)+(n.includes('jenny')||n.includes('aria')?35:0)+(n.includes('microsoft')?25:0)+(!v.localService?10:0);}
 function refreshVoices(){
   if(!TTS){$('voice').innerHTML='<option>브라우저 음성 지원 불가</option>';return}
@@ -253,7 +349,7 @@ async function start(withRecording){
     try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});recordingEnabled=true}
     catch(e){alert('마이크 권한을 확인해 줘: '+e.message);return}
   }
-  questions=generateQuestions();qIndex=-1;logs=[];clips=[];clipTasks=[];activeClip=null;done=false;running=true;plays=0;startTime=Date.now();
+  questions=generateQuestions();qIndex=-1;logs=[];clips=[];clipTasks=[];activeClip=null;done=false;running=true;plays=0;sessionFinalElapsed=null;startTime=Date.now();
   createRecognition();
   $('setup').classList.add('hidden');$('finish').classList.add('hidden');$('exam').classList.remove('hidden');
   $('micStatus').textContent=recordingEnabled?'문항별 녹음 대기':'녹음 없음';
@@ -262,11 +358,11 @@ async function start(withRecording){
 $('startWithAudio').onclick=()=>start(true);
 $('startNoAudio').onclick=()=>start(false);
 function finish(timeUp){
-  if(done)return;done=true;running=false;cancelSpeech();stopAnswer();if(interval)clearInterval(interval);
+  if(done)return;sessionFinalElapsed=Math.min(elapsed(),2400);done=true;running=false;cancelSpeech();stopAnswer();if(interval)clearInterval(interval);
   if(qIndex>=0&&qIndex<logs.length&&logs[qIndex].end===null)logs[qIndex].end=Math.min(elapsed(),2400);
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   $('exam').classList.add('hidden');$('finish').classList.remove('hidden');
-  $('finishStatus').textContent=(timeUp?'40분 제한 시간이 끝났어. ':'')+'총 '+logs.length+'문항, '+clock(Math.min(elapsed(),2400))+' 경과. 문항별 녹음은 자동 저장돼. 아래에서 전사하거나 답변 파일을 내려받아.';
+  $('finishStatus').textContent=(timeUp?'40분 제한 시간이 끝났어. ':'')+'총 '+logs.length+'문항, '+clock(sessionFinalElapsed??elapsed())+' 경과. 문항별 녹음은 자동 저장돼. 아래에서 전사하거나 답변 파일을 내려받아.';
   $('review').replaceChildren();
   for(let i=0;i<questions.length;i++){
     const q=questions[i],l=logs[i],div=document.createElement('article');div.className='question-result';
@@ -281,7 +377,7 @@ function finish(timeUp){
 function escapeHTML(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fileDownload(name,blob){const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},2500)}
 function answerText(){
-  return 'OPIc 6-6 Practice · '+new Date(startTime).toLocaleString()+'\nTime: '+clock(elapsed())+'\n\n'+questions.map((q,i)=>{
+  return 'OPIc 6-6 Practice · '+new Date(startTime).toLocaleString()+'\nTime: '+clock(sessionFinalElapsed??elapsed())+'\n\n'+questions.map((q,i)=>{
     const l=logs[i];return 'Q'+(i+1)+' ['+q.tag+'] · '+(l?clock((l.end??elapsed())-l.start):'Not taken')+'\nQUESTION: '+q.q+'\nANSWER ('+(l?.transcript?'Whisper':'live/blank')+'): '+(l?.transcript||l?.live.join(' ')||'[No transcript]')+'\n';
   }).join('\n');
 }
