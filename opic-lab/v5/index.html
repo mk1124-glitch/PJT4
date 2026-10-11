@@ -19,6 +19,7 @@ label.checkbox{display:flex;align-items:center;gap:9px;padding:10px 0}.checkbox 
 </style></head><body><header><div><b>🎧 OPIc Listening Lab <small>Audio-first v4</small></b></div></header><main>
 <section id="setup" class="panel"><p style="margin:0;color:#1976c4;font-size:12px;font-weight:850">6-6 · FULL MOCK EXAM · UNOFFICIAL</p><h1>질문은 음성으로만 듣고,<br>답변은 문항별로 녹음·전사</h1>
 <p class="muted">40분 · 15문항 · 화면에 문제 원문 비공개 · PLAY를 누를 때 질문 시작 · 질문 최대 2회 청취.</p>
+<p class="muted" style="font-size:12px"><b>문항 다양화 v5:</b> 시작할 때마다 새 시험 생성 · 서베이/돌발 위치 변동 · 콤보별 묘사/루틴/경험/비교/의견 등을 혼합 · 최근 문제 재출제 최소화 (이 브라우저에 출제 이력 저장). 연습용 확률이며 공식 출제 확률이 아님.</p>
 <div class="grid"><div class="field"><label for="voice">영어 인터뷰어 목소리</label><select id="voice"><option>음성 목록 확인 중…</option></select><small>Edge에서 Ava / Jenny / Aria (Natural)를 추천</small></div><div class="field"><label for="speed">음성 속도 <span id="speedValue">0.95×</span></label><input id="speed" type="range" min=".80" max="1.15" value=".95" step=".05"><small>실전은 0.95~1.0× 추천</small></div></div>
 <div class="row" style="margin:10px 0"><button type="button" id="sample">🔊 음질 미리 듣기</button><button type="button" id="refreshVoices">↻ 목소리 다시 검색</button></div>
 <p class="tip"><b>이번 버전의 핵심:</b> 질문을 읽어주는 동안에는 녹음을 중단하고, 질문이 끝난 뒤 네 영어 답변만 문항별로 녹음해. 시험 종료 후 한 번의 클릭으로 Whisper 전사 결과를 만들 수 있어.</p>
@@ -170,13 +171,20 @@ function comboQuestionPool(topic){
 }
 function chooseComboQuestions(topic,history){
   const pool=comboQuestionPool(topic),picked=[],usedTypes=new Set();
+  const family=type=>({
+    description:'description',specific:'description',
+    routine:'routine',process:'routine',
+    past_experience:'incident',problem:'incident',
+    non_time_compare:'comparison',time_compare:'comparison',
+    opinion:'viewpoint',preference:'viewpoint'
+  }[type]||type);
   const recentQuestionSets=history.slice(-6).map(x=>new Set(x.questionIds));
   const typeWeights={
     description:1.05,routine:1.05,past_experience:1.25,non_time_compare:1.08,
     time_compare:1.08,opinion:1.02,preference:1.0,problem:1.16,process:1.0,specific:1.0
   };
   for(let position=0;position<3;position++){
-    let available=pool.filter(x=>!picked.some(y=>y.id===x.id)&&!usedTypes.has(x.type));
+    let available=pool.filter(x=>!picked.some(y=>y.id===x.id)&&!usedTypes.has(family(x.type)));
     if(!available.length)available=pool.filter(x=>!picked.some(y=>y.id===x.id));
     const fresh=available.filter(q=>!recentQuestionSets.slice(-3).some(h=>h.has(q.id)));
     if(fresh.length)available=fresh;
@@ -190,7 +198,7 @@ function chooseComboQuestions(topic,history){
       }
       return w;
     });
-    picked.push(choice);usedTypes.add(choice.type);
+    picked.push(choice);usedTypes.add(family(choice.type));
   }
   // Fully shuffle questions; unlike prior 8 preset patterns, any order can occur.
   return shuffledItems(picked);
@@ -201,7 +209,7 @@ function generateQuestions(){
   const combinations=count===0?[[]]:count===1?[[0],[1],[2]]:[[0,1],[0,2],[1,2]];
   // Slightly discourage identical placement, without banning it or making the next slot predictable.
   const prev=history.at(-1)?.slots||'';
-  const surpriseSlots=weightedChoice(combinations,x=>x.join(',')===prev?.25:1);
+  const surpriseSlots=weightedChoice(combinations,x=>(x.join(',')===prev?0.25:1));
   const planned=[];
   for(let slot=0;slot<3;slot++){
     const kind=surpriseSlots.includes(slot)?'surprise':'survey';
@@ -213,7 +221,7 @@ function generateQuestions(){
   selectedIds.add(roleplay.id);
   const modes=['past_only','time_comparison','non_time_comparison','contemporary_analysis'];
   const prevMode=history.at(-1)?.advancedMode||'';
-  const mode=weightedChoice(modes,m=>m===prevMode?.38:1);
+  const mode=weightedChoice(modes,m=>(m===prevMode?0.38:1));
   const advanced=chooseSet(BANK.high.filter(x=>x.mode===mode),history,'advanced',5);
   selectedIds.add(advanced.id);
   const out=[{tag:'Intro',q:'Let’s start the interview. Tell me a little bit about yourself.'}];
