@@ -448,7 +448,7 @@ function escapeHTML(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','
 function fileDownload(name,blob){const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},2500)}
 function answerText(){
   return 'OPIc 6-6 Practice · '+new Date(startTime).toLocaleString()+'\nTime: '+clock(sessionFinalElapsed??elapsed())+'\n\n'+questions.map((q,i)=>{
-    const l=logs[i];return 'Q'+(i+1)+' ['+q.tag+'] · '+(l?clock((l.end??elapsed())-l.start):'Not taken')+'\nQUESTION: '+q.q+'\nANSWER ('+(l?.transcript?'Whisper':'live/blank')+'): '+(l?.transcript||l?.live.join(' ')||'[No transcript]')+'\n';
+    const l=logs[i];return 'Q'+(i+1)+' ['+q.tag+'] · '+(l?clock((l.end??elapsed())-l.start):'Not taken')+'\nQUESTION: '+q.q+'\nANSWER ('+(l?.transcript?'Whisper':'live/blank')+'): '+(l?.transcriptWarning?'[WARNING: possible Whisper transcription loop; verify audio ZIP] ':'')+(l?.transcript||l?.live.join(' ')||'[No transcript]')+'\n';
   }).join('\n');
 }
 $('downloadText').onclick=()=>fileDownload('OPIc_QA_'+Date.now()+'.txt',new Blob([answerText()],{type:'text/plain;charset=utf-8'}));
@@ -482,6 +482,17 @@ $('downloadClips').onclick=async()=>{
   fileDownload('OPIc_answers_by_question.zip',await makeZip(files));$('asrStatus').textContent=clips.length+'개의 답변 음성과 질문 기록을 ZIP으로 저장했어.';
   }catch(e){$('asrStatus').textContent=e.message}finally{btn.disabled=false}
 };
+function hasWhisperRepetition(text){
+  const tokens=(text.toLowerCase().match(/[a-z']+/g)||[]);
+  if(tokens.length<30)return false;
+  let streak=1,frequency=new Map();
+  for(let i=0;i<tokens.length;i++){
+    frequency.set(tokens[i],(frequency.get(tokens[i])||0)+1);
+    streak=i&&tokens[i]===tokens[i-1]?streak+1:1;
+    if(streak>=12)return true;
+  }
+  return tokens.length>=65&&Math.max(...frequency.values())/tokens.length>.55;
+}
 $('runASR').onclick=async()=>{
   const btn=$('runASR');btn.disabled=true;try{
     await Promise.allSettled(clipTasks);
@@ -497,7 +508,9 @@ $('runASR').onclick=async()=>{
         words.push(await transcribePCM(asr,pcm));
       }
       logs[i].transcript=words.filter(Boolean).join(' ');
-      const div=$('review').children[i];if(div)div.querySelector('.answerView').textContent='Whisper 자동 전사: '+(logs[i].transcript||'[인식 실패]');
+      logs[i].transcriptWarning=hasWhisperRepetition(logs[i].transcript);
+      const div=$('review').children[i];
+      if(div)div.querySelector('.answerView').textContent=(logs[i].transcriptWarning?'⚠️ 단어 반복이 비정상적으로 많아 전사 오류가 의심돼. ZIP에서 원본 음성을 확인해.\n':'')+'Whisper 자동 전사: '+(logs[i].transcript||'[인식 실패]');
     }
     $('asrStatus').textContent='전사 완료! 「전체 텍스트 복사」 버튼으로 질문과 발화를 복사해 ChatGPT에 붙여넣어 줘.';
   }catch(e){$('asrStatus').textContent='전사 실패: '+e.message+' · 녹음 ZIP으로 저장은 계속 가능해.'}
