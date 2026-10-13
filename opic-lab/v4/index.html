@@ -406,12 +406,12 @@ $('pauseBtn').onclick=()=>{if(!$('comboFeedback').classList.contains('hidden'))r
 
 let comboStart=0,comboEnd=0,comboBusy=false;
 function comboExportText(){
-  return 'OPIc 6-6 · 콤보 중간 피드백 · '+new Date(startTime).toLocaleString()+'\\n'
-  +'평가 기준: MP의 명확성, 하나의 이야기 유지, 자연스러운 인과관계, 실제 영어 오류만 정확히 지적. 모든 세부 질문 요소를 체크리스트로 채점하지 말 것. MP에서 결론을 먼저 말하고 Body에서 과거로 돌아가는 구조는 정상. 문항별로만 피드백, 종합평가 제외. Whisper 전사 오류는 단정하지 말 것.\\n\\n'
+  return 'OPIc 6-6 · 콤보 중간 피드백 · '+new Date(startTime).toLocaleString()+'\n'
+  +'평가 기준: MP의 명확성, 하나의 이야기 유지, 자연스러운 인과관계, 실제 영어 오류만 정확히 지적. 모든 세부 질문 요소를 체크리스트로 채점하지 말 것. MP에서 결론을 먼저 말하고 Body에서 과거로 돌아가는 구조는 정상. 문항별로만 피드백, 종합평가 제외. Whisper 전사 오류는 단정하지 말 것.\n\n'
   +questions.slice(comboStart,comboEnd).map((q,j)=>{
     const i=comboStart+j,l=logs[i],a=l?.transcript||l?.live?.join(' ')||'[전사 없음 · 음성 전사 필요]';
-    return 'Q'+(i+1)+' ['+q.tag+']\\nQUESTION: '+q.q+'\\nANSWER: '+(l?.transcriptWarning?'[Whisper 반복 오류 주의] ':'')+a+'\\n';
-  }).join('\\n');
+    return 'Q'+(i+1)+' ['+q.tag+']\nQUESTION: '+q.q+'\nANSWER: '+(l?.transcriptWarning?'[Whisper 반복 오류 주의] ':'')+a+'\n';
+  }).join('\n');
 }
 function refreshComboText(){$('comboText').value=comboExportText()}
 function openComboFeedback(start,end){
