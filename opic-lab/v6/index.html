@@ -43,11 +43,11 @@ label.checkbox{display:flex;align-items:center;gap:9px;padding:10px 0}.checkbox 
 <div class="statebox"><div class="status" id="statusName">READY</div><h2 id="statusTip">PLAY 버튼을 눌러 문제를 들어</h2><div class="row"><span id="micStatus" class="mic">문항별 녹음 대기</span><span style="margin-left:auto;font-weight:800" id="qtime">00:00</span></div></div><div id="message" aria-live="polite"></div></div></div>
 <div class="footer"><small>답변을 완료했을 때만 NEXT를 눌러. 너무 일찍 누르면 확인창이 떠.</small><button type="button" class="orange big" id="next" disabled>답변 완료 → NEXT</button></div>
 </section>
-<section id="finish" class="panel hidden"><h1>시험 종료 · 자동 전사 및 복기</h1><p class="muted" id="finishStatus"></p>
-<div class="asr"><h2>🎙️ 녹음 답변 영어로 변환</h2><p style="font-size:14px">각 질문에 대한 답변 구간만 따로 Whisper로 인식해. <b>영어 전용 모델에 잘못된 언어 옵션을 전달하던 오류도 수정</b>했어.</p>
-<div class="row"><div class="field" style="flex:1"><label for="modelSize">음성 인식 모델</label><select id="modelSize"><option value="tiny">빠른 전사 · Whisper Tiny English</option><option value="base" selected>더 정확한 전사 · Whisper Base English</option></select></div><button id="runASR" class="primary">✨ 15문항 자동 전사</button></div><p id="asrStatus" class="tip">첫 실행은 모델 다운로드가 필요해. PC의 Edge를 권장해.</p></div>
-<div class="btnrow"><button id="copyText" class="primary">📋 질문+내 답변 전체 복사</button><button id="downloadText">📄 교정용 TXT 저장</button><button id="downloadClips">🎤 답변별 녹음 ZIP</button><button id="restart">↻ 새로운 모의고사</button></div>
-<details open><summary>질문 및 영어 전사 결과 보기</summary><div id="review"></div></details>
+<section id="finish" class="panel hidden"><h1>시험 종료 · Q14~Q15 마지막 콤보 피드백</h1><p class="muted" id="finishStatus"></p>
+<div class="asr"><h2>🎙️ 녹음 답변 영어로 변환</h2><p style="font-size:14px">마지막 Q14~Q15 두 문항만 Whisper로 전사해. 이전 콤보(Q1~Q13)는 재전사하지 않아.</p>
+<div class="row"><div class="field" style="flex:1"><label for="modelSize">음성 인식 모델</label><select id="modelSize"><option value="tiny">빠른 전사 · Whisper Tiny English</option><option value="base" selected>더 정확한 전사 · Whisper Base English</option></select></div><button id="runASR" class="primary">✨ Q14~Q15 전사</button></div><p id="asrStatus" class="tip">첫 실행은 모델 다운로드가 필요해. PC의 Edge를 권장해.</p></div>
+<div class="btnrow"><button id="copyText" class="primary">📋 Q14~Q15 복사</button><button id="downloadText">📄 Q14~Q15 TXT</button><button id="downloadClips">🎤 Q14~Q15 녹음 ZIP</button><button id="downloadAllClips">📦 전체 녹음 ZIP (선택)</button><button id="restart">↻ 새로운 모의고사</button></div>
+<details open><summary>질문 및 영어 전사 결과 보기 (전체 기록)</summary><div id="review"></div></details>
 <p class="tip">기존 36분짜리 M4A 녹음은 <a href="transcribe.html">이전 녹음 전사 도구</a>에서 질문 기록 TXT와 함께 분석할 수 있어. 새 모의고사는 전사 결과만 ChatGPT에 보내면 바로 교정할 수 있도록 만들었어.</p>
 </section>
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="dialog"><h2>정말 다음 문항으로 넘어갈까?</h2><p id="confirmText">질문을 들은 지 얼마 지나지 않았어.</p><div class="row"><button id="stay" class="primary">현재 문항 계속하기</button><button id="confirmNext" class="gray">다음 문제로 이동</button></div></div></div>
@@ -544,13 +544,14 @@ function finish(timeUp){
 }
 function escapeHTML(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fileDownload(name,blob){const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},2500)}
-function answerText(){
-  return 'OPIc 6-6 Practice · '+new Date(startTime).toLocaleString()+'\nTime: '+clock(sessionFinalElapsed??elapsed())+'\n\n'+questions.map((q,i)=>{
+function answerText(start=0,end=questions.length){
+  return 'OPIc 6-6 Practice · '+new Date(startTime).toLocaleString()+'\nTime: '+clock(sessionFinalElapsed??elapsed())+'\n\n'+questions.slice(start,end).map((q,j)=>{
+    const i=start+j;
     const l=logs[i];return 'Q'+(i+1)+' ['+q.tag+'] · '+(l?clock((l.end??elapsed())-l.start):'Not taken')+'\nQUESTION: '+q.q+'\nANSWER ('+(l?.transcript?'Whisper':'live/blank')+'): '+(l?.transcriptWarning?'[WARNING: possible Whisper transcription loop; verify audio ZIP] ':'')+(l?.transcript||l?.live.join(' ')||'[No transcript]')+'\n';
   }).join('\n');
 }
-$('downloadText').onclick=()=>fileDownload('OPIc_QA_'+Date.now()+'.txt',new Blob([answerText()],{type:'text/plain;charset=utf-8'}));
-$('copyText').onclick=async()=>{try{await navigator.clipboard.writeText(answerText());$('asrStatus').textContent='전체 교정용 텍스트를 복사했어. ChatGPT에 붙여넣어 줘.'}catch(e){$('asrStatus').textContent='복사가 차단됐어. TXT 저장을 이용해 줘.'}};
+$('downloadText').onclick=()=>fileDownload('OPIc_Q14-15_'+Date.now()+'.txt',new Blob([answerText(13,15)],{type:'text/plain;charset=utf-8'}));
+$('copyText').onclick=async()=>{try{await navigator.clipboard.writeText(answerText(13,15));$('asrStatus').textContent='전체 교정용 텍스트를 복사했어. ChatGPT에 붙여넣어 줘.'}catch(e){$('asrStatus').textContent='복사가 차단됐어. TXT 저장을 이용해 줘.'}};
 $('restart').onclick=()=>{$('finish').classList.add('hidden');$('setup').classList.remove('hidden')};
 // Simple dependency-free ZIP store writer, used for per-question audio exports.
 function crc32(bytes){let c=~0;for(const b of bytes){c^=b;for(let i=0;i<8;i++)c=(c>>>1)^(-(c&1)&0xedb88320)}return (~c)>>>0}
@@ -575,10 +576,24 @@ async function makeZip(files){
 $('downloadClips').onclick=async()=>{
   const btn=$('downloadClips');btn.disabled=true;$('asrStatus').textContent='문항별 파일을 모으는 중...';
   try{await Promise.allSettled(clipTasks);if(!clips.length)throw Error('저장된 답변 음성이 없어.');
-  const files=clips.map(c=>({name:'Q'+String(c.q).padStart(2,'0')+'_part'+c.part+(c.blob.type.includes('mp4')?'.m4a':'.webm'),blob:c.blob}));
-  files.push({name:'questions_and_transcript.txt',blob:new Blob([answerText()],{type:'text/plain'})});
-  fileDownload('OPIc_answers_by_question.zip',await makeZip(files));$('asrStatus').textContent=clips.length+'개의 답변 음성과 질문 기록을 ZIP으로 저장했어.';
+  const finalClips=clips.filter(c=>c.q>=14&&c.q<=15);
+  if(!finalClips.length)throw Error('Q14~Q15 녹음이 없어.');
+  const files=finalClips.map(c=>({name:'Q'+String(c.q).padStart(2,'0')+'_part'+c.part+(c.blob.type.includes('mp4')?'.m4a':'.webm'),blob:c.blob}));
+  files.push({name:'questions_and_transcript.txt',blob:new Blob([answerText(13,15)],{type:'text/plain;charset=utf-8'})});
+  fileDownload('OPIc_combo_Q14-15_audio.zip',await makeZip(files));$('asrStatus').textContent=finalClips.length+'개 Q14~Q15 녹음과 전사 TXT를 ZIP으로 저장했어.';
   }catch(e){$('asrStatus').textContent=e.message}finally{btn.disabled=false}
+};
+$('downloadAllClips').onclick=async()=>{
+  const btn=$('downloadAllClips');btn.disabled=true;
+  try{
+    await Promise.allSettled(clipTasks);
+    if(!clips.length)throw Error('녹음 파일이 없어.');
+    const files=clips.map(c=>({name:'Q'+String(c.q).padStart(2,'0')+'_part'+c.part+(c.blob.type.includes('mp4')?'.m4a':'.webm'),blob:c.blob}));
+    files.push({name:'all_questions_and_transcripts.txt',blob:new Blob([answerText()],{type:'text/plain;charset=utf-8'})});
+    fileDownload('OPIc_all_answers.zip',await makeZip(files));
+    $('asrStatus').textContent='전체 녹음 ZIP 저장 완료.';
+  }catch(e){$('asrStatus').textContent=e.message}
+  finally{btn.disabled=false}
 };
 function hasWhisperRepetition(text){
   const tokens=(text.toLowerCase().match(/[a-z']+/g)||[]);
@@ -594,9 +609,9 @@ function hasWhisperRepetition(text){
 $('runASR').onclick=async()=>{
   const btn=$('runASR');btn.disabled=true;try{
     await Promise.allSettled(clipTasks);
-    if(!clips.length)throw Error('음성 답변 파일이 없어. 시작할 때 「녹음하며 시작」을 선택해야 해.');
+    if(!clips.some(c=>c.q===14||c.q===15))throw Error('Q14~Q15 음성 답변이 없어. 녹음 모드로 시험을 시작했는지 확인해.');
     let asr=await getASR(s=>$('asrStatus').textContent=s,$('modelSize').value);
-    for(let i=0;i<questions.length;i++){
+    for(let i=13;i<Math.min(15,questions.length);i++){
       const row=clips.filter(c=>c.q===i+1).sort((a,b)=>a.part-b.part);
       if(!row.length){if(logs[i])logs[i].transcript=logs[i].live.join(' ');continue}
       const words=[];
@@ -610,7 +625,7 @@ $('runASR').onclick=async()=>{
       const div=$('review').children[i];
       if(div)div.querySelector('.answerView').textContent=(logs[i].transcriptWarning?'⚠️ 단어 반복이 비정상적으로 많아 전사 오류가 의심돼. ZIP에서 원본 음성을 확인해.\n':'')+'Whisper 자동 전사: '+(logs[i].transcript||'[인식 실패]');
     }
-    $('asrStatus').textContent='전사 완료! 「전체 텍스트 복사」 버튼으로 질문과 발화를 복사해 ChatGPT에 붙여넣어 줘.';
+    $('asrStatus').textContent='Q14~Q15 전사 완료! 두 문항 복사 또는 ZIP 저장을 이용해 줘.';
   }catch(e){$('asrStatus').textContent='전사 실패: '+e.message+' · 녹음 ZIP으로 저장은 계속 가능해.'}
   finally{btn.disabled=false}
 };
